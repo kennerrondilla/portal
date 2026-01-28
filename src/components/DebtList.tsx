@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { Plus, MoreVertical, TrendingDown, AlertCircle, X, Gavel, Scale, FileText, Sparkles, CheckCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Plus, MoreVertical, TrendingDown, AlertCircle, X, Gavel, Scale, FileText, Sparkles } from 'lucide-react';
 import { DebtExtraction } from './DebtExtraction';
 import { AddDebtManually, ManualDebtInput } from './AddDebtManually';
+import { apiFetch } from '../api/client';
 
 interface Debt {
   id: string;
@@ -27,162 +28,84 @@ interface Debt {
   accountNumber?: string;
 }
 
-const mockDebts: Debt[] = [
-  {
-    id: '1',
-    creditor: 'Chase Credit Card',
-    type: 'Credit Card',
-    originalAmount: 12500,
-    currentBalance: 11800,
-    interestAccrued: 1240,
-    status: 'Active',
-    lastPayment: '12/01/2024',
-    nextDue: '01/01/2025',
-    legalStatus: 'None',
-  },
-  {
-    id: '2',
-    creditor: 'Capital One Visa',
-    originalCreditor: 'Capital One Bank',
-    collectionAgency: 'Nationwide Credit Services',
-    type: 'Credit Card',
-    originalAmount: 8900,
-    currentBalance: 6700,
-    interestAccrued: 780,
-    status: 'In Settlement',
-    lastPayment: '11/28/2024',
-    legalStatus: 'Collections',
-    legalDetails: {
-      filedDate: '10/15/2024',
-      attorney: 'Smith & Associates',
-    },
-  },
-  {
-    id: '3',
-    creditor: 'Medical Center Hospital',
-    type: 'Medical Bill',
-    originalAmount: 15200,
-    currentBalance: 8360,
-    interestAccrued: 340,
-    status: 'In Settlement',
-    lastPayment: '12/05/2024',
-    legalStatus: 'Legal Pursuit',
-    legalDetails: {
-      caseNumber: 'CV-2024-12345',
-      filedDate: '09/20/2024',
-      courtName: 'Superior Court of County',
-      attorney: 'Johnson Legal Group',
-    },
-  },
-  {
-    id: '4',
-    creditor: 'Personal Loan - Bank',
-    type: 'Personal Loan',
-    originalAmount: 8900,
-    currentBalance: 8900,
-    interestAccrued: 1560,
-    status: 'Active',
-    nextDue: '12/20/2024',
-    legalStatus: 'None',
-  },
-  {
-    id: '5',
-    creditor: 'Discover Card',
-    originalCreditor: 'Discover Financial Services',
-    collectionAgency: 'Allied Collection Group',
-    type: 'Credit Card',
-    originalAmount: 6600,
-    currentBalance: 4070,
-    interestAccrued: 890,
-    status: 'Overdue',
-    lastPayment: '10/15/2024',
-    nextDue: '11/15/2024',
-    legalStatus: 'Judgment',
-    legalDetails: {
-      caseNumber: 'CV-2024-09876',
-      filedDate: '07/10/2024',
-      courtName: 'District Court',
-      attorney: 'Harper & Associates',
-      judgmentAmount: 5240,
-      judgmentDate: '11/05/2024',
-    },
-  },
-  {
-    id: '6',
-    creditor: 'City Clinic',
-    type: 'Medical Bill',
-    originalAmount: 3940,
-    currentBalance: 3940,
-    interestAccrued: 120,
-    status: 'Active',
-    nextDue: '01/10/2025',
-    legalStatus: 'None',
-  },
-  {
-    id: '7',
-    creditor: 'Utility Company',
-    originalCreditor: 'City Utilities Inc.',
-    collectionAgency: 'ABC Collections',
-    type: 'Other',
-    originalAmount: 1560,
-    currentBalance: 1460,
-    interestAccrued: 45,
-    status: 'Active',
-    lastPayment: '11/30/2024',
-    nextDue: '12/30/2024',
-    legalStatus: 'Collections',
-    legalDetails: {
-      filedDate: '11/01/2024',
-      attorney: 'ABC Collections',
-    },
-  },
-];
-
 export function DebtList() {
-  const [debts, setDebts] = useState<Debt[]>(mockDebts);
+  const [debts, setDebts] = useState<Debt[]>([]);
   const [filter, setFilter] = useState<string>('All');
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
   const [showExtractionModal, setShowExtractionModal] = useState(false);
   const [showManualAddModal, setShowManualAddModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const handleDebtsExtracted = (extractedDebts: any[]) => {
-    // Convert extracted debts to Debt format and add to list
-    const newDebts = extractedDebts.map((extracted, index) => ({
-      id: `extracted-${Date.now()}-${index}`,
-      creditor: extracted.creditor,
-      originalCreditor: extracted.originalCreditor,
-      collectionAgency: extracted.collectionAgency,
-      type: extracted.debtType,
-      originalAmount: extracted.balance,
-      currentBalance: extracted.balance,
-      interestAccrued: 0,
-      status: extracted.status as 'Active' | 'In Settlement' | 'Settled' | 'Overdue',
-      accountNumber: extracted.accountNumber,
-      legalStatus: 'None' as const,
-    }));
-
-    setDebts([...newDebts, ...debts]);
-  };
-
-  const handleManualDebtAdded = (manualDebtInput: ManualDebtInput) => {
-    const newDebt: Debt = {
-      id: `manual-${Date.now()}`,
-      creditor: manualDebtInput.creditor,
-      originalCreditor: manualDebtInput.originalCreditor,
-      collectionAgency: manualDebtInput.collectionAgency,
-      type: manualDebtInput.debtType,
-      originalAmount: manualDebtInput.originalAmount,
-      currentBalance: manualDebtInput.currentBalance,
-      interestAccrued: manualDebtInput.interestAccrued,
-      status: manualDebtInput.status,
-      lastPayment: manualDebtInput.lastPayment,
-      nextDue: manualDebtInput.nextDue,
-      legalStatus: manualDebtInput.legalStatus,
-      legalDetails: manualDebtInput.legalDetails,
-      accountNumber: manualDebtInput.accountNumber,
+  useEffect(() => {
+    const loadDebts = async () => {
+      try {
+        const data = await apiFetch<Debt[]>('/debts');
+        setDebts(data);
+      } catch (error) {
+        setLoadError('Unable to load debts.');
+      } finally {
+        setIsLoading(false);
+      }
     };
 
-    setDebts([newDebt, ...debts]);
+    loadDebts();
+  }, []);
+
+  const handleDebtsExtracted = async (extractedDebts: any[]) => {
+    // Convert extracted debts to Debt format and add to list
+    try {
+      const newDebts = await Promise.all(
+        extractedDebts.map((extracted) =>
+          apiFetch<Debt>('/debts', {
+            method: 'POST',
+            body: JSON.stringify({
+              creditor: extracted.creditor,
+              originalCreditor: extracted.originalCreditor,
+              collectionAgency: extracted.collectionAgency,
+              type: extracted.debtType,
+              originalAmount: extracted.balance,
+              currentBalance: extracted.balance,
+              interestAccrued: 0,
+              status: extracted.status,
+              accountNumber: extracted.accountNumber,
+              legalStatus: 'None',
+            }),
+          }),
+        ),
+      );
+
+      setDebts([...newDebts, ...debts]);
+    } catch (error) {
+      setLoadError('Unable to save extracted debts.');
+    }
+  };
+
+  const handleManualDebtAdded = async (manualDebtInput: ManualDebtInput) => {
+    try {
+      const newDebt = await apiFetch<Debt>('/debts', {
+        method: 'POST',
+        body: JSON.stringify({
+          creditor: manualDebtInput.creditor,
+          originalCreditor: manualDebtInput.originalCreditor,
+          collectionAgency: manualDebtInput.collectionAgency,
+          type: manualDebtInput.debtType,
+          originalAmount: manualDebtInput.originalAmount,
+          currentBalance: manualDebtInput.currentBalance,
+          interestAccrued: manualDebtInput.interestAccrued,
+          status: manualDebtInput.status,
+          lastPayment: manualDebtInput.lastPayment,
+          nextDue: manualDebtInput.nextDue,
+          legalStatus: manualDebtInput.legalStatus,
+          legalDetails: manualDebtInput.legalDetails,
+          accountNumber: manualDebtInput.accountNumber,
+        }),
+      });
+
+      setDebts([newDebt, ...debts]);
+    } catch (error) {
+      setLoadError('Unable to add debt.');
+    }
   };
 
   const filteredDebts = filter === 'All' ? debts : debts.filter(d => d.status === filter);
@@ -268,6 +191,17 @@ export function DebtList() {
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
+      {isLoading && (
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+          Loading debts...
+        </div>
+      )}
+
       {/* AI Extraction Info Banner */}
       <div className="bg-gradient-to-r from-purple-50 to-green-50 border border-purple-200 rounded-lg p-4">
         <div className="flex items-start gap-3">

@@ -1,19 +1,18 @@
-import { useState } from 'react';
-import { CheckCircle, AlertTriangle, Calendar, DollarSign, X, FileSignature, Info } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CheckCircle, AlertTriangle, DollarSign, X, FileSignature } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Checkbox } from './ui/checkbox';
 import { toast } from 'sonner@2.0.3';
+import { apiFetch } from '../api/client';
 
 interface Debt {
   id: string;
   creditor: string;
   originalAmount: number;
   currentBalance: number;
-  estimatedSettlement: number;
-  estimatedSavings: number;
   type: string;
   status: string;
 }
@@ -27,51 +26,8 @@ interface SettlementCommitment {
   signature: string;
 }
 
-const mockDebts: Debt[] = [
-  {
-    id: '1',
-    creditor: 'Chase Credit Card',
-    originalAmount: 12500,
-    currentBalance: 11800,
-    estimatedSettlement: 7080,
-    estimatedSavings: 4720,
-    type: 'Credit Card',
-    status: 'Active',
-  },
-  {
-    id: '2',
-    creditor: 'Capital One Visa',
-    originalAmount: 8900,
-    currentBalance: 6700,
-    estimatedSettlement: 3685,
-    estimatedSavings: 3015,
-    type: 'Credit Card',
-    status: 'In Settlement',
-  },
-  {
-    id: '4',
-    creditor: 'Personal Loan - Bank',
-    originalAmount: 8900,
-    currentBalance: 8900,
-    estimatedSettlement: 5340,
-    estimatedSavings: 3560,
-    type: 'Personal Loan',
-    status: 'Active',
-  },
-  {
-    id: '5',
-    creditor: 'Discover Card',
-    originalAmount: 6600,
-    currentBalance: 4070,
-    estimatedSettlement: 2239,
-    estimatedSavings: 1831,
-    type: 'Credit Card',
-    status: 'Overdue',
-  },
-];
-
 export function SettlementReadiness() {
-  const [debts] = useState<Debt[]>(mockDebts);
+  const [debts, setDebts] = useState<Debt[]>([]);
   const [commitments, setCommitments] = useState<SettlementCommitment[]>([]);
   const [selectedDebts, setSelectedDebts] = useState<string[]>([]);
   const [showESignature, setShowESignature] = useState(false);
@@ -79,12 +35,39 @@ export function SettlementReadiness() {
   const [totalBudget, setTotalBudget] = useState('');
   const [budgetDate, setBudgetDate] = useState('');
   const [showBudgetCommitment, setShowBudgetCommitment] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   
   // E-signature state
   const [agreed1, setAgreed1] = useState(false);
   const [agreed2, setAgreed2] = useState(false);
   const [agreed3, setAgreed3] = useState(false);
   const [signatureName, setSignatureName] = useState('');
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [debtData, commitmentData] = await Promise.all([
+          apiFetch<Debt[]>('/debts'),
+          apiFetch<SettlementCommitment[]>('/settlement-commitments'),
+        ]);
+        setDebts(debtData);
+        setCommitments(commitmentData);
+      } catch (error) {
+        setLoadError('Unable to load settlement readiness data.');
+      }
+    };
+
+    loadData();
+  }, []);
+
+  const getEstimatedSettlement = (debt: Debt) => {
+    const nonNegotiableTypes = ['medical bill', 'medical bills', 'medical', 'utility', 'utilities', 'student loan', 'student loans'];
+    const isNonNegotiable = nonNegotiableTypes.some(type => debt.type.toLowerCase().includes(type));
+    if (isNonNegotiable) return debt.originalAmount;
+    if (debt.status === 'Settled') return debt.currentBalance;
+    if (debt.status === 'In Settlement') return debt.currentBalance * 0.6;
+    return debt.currentBalance * 0.55;
+  };
 
   const handleToggleDebt = (debtId: string) => {
     if (selectedDebts.includes(debtId)) {
@@ -106,7 +89,7 @@ export function SettlementReadiness() {
     setShowESignature(true);
   };
 
-  const handleSignAndCommit = () => {
+  const handleSignAndCommit = async () => {
     if (!agreed1 || !agreed2 || !agreed3) {
       toast.error('Please agree to all terms');
       return;
@@ -117,38 +100,41 @@ export function SettlementReadiness() {
     }
 
     const selectedDebtDetails = debts.filter(d => selectedDebts.includes(d.id));
-    const newCommitments: SettlementCommitment[] = selectedDebtDetails.map(debt => ({
-      debtId: debt.id,
-      creditor: debt.creditor,
-      settlementAmount: debt.estimatedSettlement,
-      commitmentDate: settlementDate,
-      signedAt: new Date().toISOString(),
-      signature: signatureName,
-    }));
+    try {
+      const newCommitments = await Promise.all(
+        selectedDebtDetails.map((debt) =>
+          apiFetch<SettlementCommitment>('/settlement-commitments', {
+            method: 'POST',
+            body: JSON.stringify({
+              debtId: debt.id,
+              creditor: debt.creditor,
+              settlementAmount: getEstimatedSettlement(debt),
+              commitmentDate: settlementDate,
+              signedAt: new Date().toISOString(),
+              signature: signatureName,
+            }),
+          }),
+        ),
+      );
 
-    setCommitments([...commitments, ...newCommitments]);
+      setCommitments([...commitments, ...newCommitments]);
 
-    // Notify admin
-    console.log('Admin notification: Settlement commitment signed', {
-      debts: selectedDebtDetails,
-      date: settlementDate,
-      signature: signatureName,
-      timestamp: new Date().toISOString(),
-    });
+      toast.success(`Settlement commitment for ${selectedDebtDetails.length} debt(s) confirmed! Admin has been notified.`);
 
-    toast.success(`Settlement commitment for ${selectedDebtDetails.length} debt(s) confirmed! Admin has been notified.`);
-
-    // Reset
-    setSelectedDebts([]);
-    setSettlementDate('');
-    setShowESignature(false);
-    setAgreed1(false);
-    setAgreed2(false);
-    setAgreed3(false);
-    setSignatureName('');
+      // Reset
+      setSelectedDebts([]);
+      setSettlementDate('');
+      setShowESignature(false);
+      setAgreed1(false);
+      setAgreed2(false);
+      setAgreed3(false);
+      setSignatureName('');
+    } catch (error) {
+      toast.error('Unable to save settlement commitment.');
+    }
   };
 
-  const handleBudgetCommit = () => {
+  const handleBudgetCommit = async () => {
     if (!totalBudget || !budgetDate) {
       toast.error('Please enter budget amount and available date');
       return;
@@ -160,27 +146,38 @@ export function SettlementReadiness() {
       return;
     }
 
-    // Notify admin
-    console.log('Admin notification: Total budget committed', {
-      amount: budget,
-      date: budgetDate,
-      timestamp: new Date().toISOString(),
-    });
+    try {
+      await apiFetch('/budget-commitments', {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: budget,
+          availableDate: budgetDate,
+          notes: 'Settlement readiness commitment',
+        }),
+      });
 
-    toast.success(`Budget of $${budget.toLocaleString()} committed for ${budgetDate}! Admin has been notified.`);
+      toast.success(`Budget of $${budget.toLocaleString()} committed for ${budgetDate}! Admin has been notified.`);
 
-    // Reset
-    setTotalBudget('');
-    setBudgetDate('');
-    setShowBudgetCommitment(false);
+      // Reset
+      setTotalBudget('');
+      setBudgetDate('');
+      setShowBudgetCommitment(false);
+    } catch (error) {
+      toast.error('Unable to commit budget.');
+    }
   };
 
   const selectedTotal = debts
     .filter(d => selectedDebts.includes(d.id))
-    .reduce((sum, d) => sum + d.estimatedSettlement, 0);
+    .reduce((sum, d) => sum + getEstimatedSettlement(d), 0);
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
       {/* Page Header */}
       <div>
         <h2 className="text-2xl font-bold text-gray-900">Settlement Readiness</h2>
@@ -291,6 +288,8 @@ export function SettlementReadiness() {
           {debts.map((debt) => {
             const isSelected = selectedDebts.includes(debt.id);
             const isCommitted = commitments.some(c => c.debtId === debt.id);
+            const estimatedSettlement = getEstimatedSettlement(debt);
+            const estimatedSavings = debt.originalAmount - estimatedSettlement;
 
             return (
               <Card 
@@ -330,11 +329,11 @@ export function SettlementReadiness() {
                       </div>
                       <div>
                         <p className="text-gray-500">Estimated Settlement</p>
-                        <p className="font-medium text-green-600">${debt.estimatedSettlement.toLocaleString()}</p>
+                        <p className="font-medium text-green-600">${Math.round(estimatedSettlement).toLocaleString()}</p>
                       </div>
                       <div>
                         <p className="text-gray-500">Estimated Savings</p>
-                        <p className="font-medium text-blue-600">${debt.estimatedSavings.toLocaleString()}</p>
+                        <p className="font-medium text-blue-600">${Math.round(estimatedSavings).toLocaleString()}</p>
                       </div>
                       <div>
                         <p className="text-gray-500">Type</p>
@@ -418,7 +417,7 @@ export function SettlementReadiness() {
                 <ul className="space-y-1 mb-3">
                   {debts.filter(d => selectedDebts.includes(d.id)).map(debt => (
                     <li key={debt.id} className="text-sm text-gray-700">
-                      • {debt.creditor} - ${debt.estimatedSettlement.toLocaleString()}
+                      • {debt.creditor} - ${Math.round(getEstimatedSettlement(debt)).toLocaleString()}
                     </li>
                   ))}
                 </ul>

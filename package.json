@@ -3,7 +3,7 @@
       "name": "Debt Settlement Portal",
       "version": "0.1.0",
       "private": true,
-      "dependencies": {
+  "dependencies": {
           "@radix-ui/react-accordion": "^1.2.3",
           "@radix-ui/react-alert-dialog": "^1.1.6",
           "@radix-ui/react-aspect-ratio": "^1.1.2",
@@ -45,15 +45,20 @@
           "recharts": "^2.15.2",
           "sonner": "^2.0.3",
           "tailwind-merge": "*",
-          "vaul": "^1.1.2"
+        "vaul": "^1.1.2",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "express": "^4.21.2",
+        "mysql2": "^3.11.0"
       },
       "devDependencies": {
           "@types/node": "^20.10.0",
           "@vitejs/plugin-react-swc": "^3.10.2",
           "vite": "6.3.5"
       },
-      "scripts": {
-          "dev": "vite",
-          "build": "vite build"
-      }
+  "scripts": {
+      "dev": "vite",
+      "build": "vite build",
+      "server": "node server/index.js"
   }
+}
