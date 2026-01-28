@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { CreditCard, Building, Plus, Trash2, Edit, X, Save, CheckCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CreditCard, Building, Plus, Trash2, X, Save, CheckCircle } from 'lucide-react';
+import { apiFetch } from '../api/client';
 
 interface PaymentMethod {
   id: string;
@@ -14,27 +15,9 @@ interface PaymentMethod {
 }
 
 export function PaymentMethods() {
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([
-    {
-      id: '1',
-      type: 'Bank Account',
-      name: 'Chase Checking',
-      last4: '1234',
-      isPrimary: true,
-      holderName: 'John Smith',
-      bankName: 'Chase Bank',
-      accountType: 'Checking',
-    },
-    {
-      id: '2',
-      type: 'Credit Card',
-      name: 'Visa Card',
-      last4: '5678',
-      isPrimary: false,
-      holderName: 'John Smith',
-      expiryDate: '12/26',
-    },
-  ]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingMethod, setEditingMethod] = useState<string | null>(null);
@@ -46,45 +29,72 @@ export function PaymentMethods() {
     isPrimary: false,
   });
 
-  const handleAddMethod = () => {
+  useEffect(() => {
+    const loadMethods = async () => {
+      try {
+        const data = await apiFetch<PaymentMethod[]>('/payment-methods');
+        setPaymentMethods(data);
+      } catch (error) {
+        setLoadError('Unable to load payment methods.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadMethods();
+  }, []);
+
+  const handleAddMethod = async () => {
     if (newMethod.name && newMethod.last4 && newMethod.holderName) {
-      const method: PaymentMethod = {
-        id: Date.now().toString(),
-        type: newMethod.type || 'Bank Account',
-        name: newMethod.name,
-        last4: newMethod.last4,
-        isPrimary: paymentMethods.length === 0 || newMethod.isPrimary || false,
-        holderName: newMethod.holderName,
-        ...(newMethod.type === 'Bank Account' && {
-          bankName: newMethod.bankName,
-          accountType: newMethod.accountType,
-        }),
-        ...(newMethod.type !== 'Bank Account' && {
-          expiryDate: newMethod.expiryDate,
-        }),
-      };
-      
-      setPaymentMethods([...paymentMethods, method]);
-      setShowAddModal(false);
-      setNewMethod({
-        type: 'Bank Account',
-        name: '',
-        last4: '',
-        holderName: '',
-        isPrimary: false,
-      });
+      try {
+        const method = await apiFetch<PaymentMethod>('/payment-methods', {
+          method: 'POST',
+          body: JSON.stringify({
+            type: newMethod.type || 'Bank Account',
+            name: newMethod.name,
+            last4: newMethod.last4,
+            isPrimary: paymentMethods.length === 0 || newMethod.isPrimary || false,
+            holderName: newMethod.holderName,
+            bankName: newMethod.type === 'Bank Account' ? newMethod.bankName : undefined,
+            accountType: newMethod.type === 'Bank Account' ? newMethod.accountType : undefined,
+            expiryDate: newMethod.type !== 'Bank Account' ? newMethod.expiryDate : undefined,
+          }),
+        });
+
+        setPaymentMethods([...paymentMethods, method]);
+        setShowAddModal(false);
+        setNewMethod({
+          type: 'Bank Account',
+          name: '',
+          last4: '',
+          holderName: '',
+          isPrimary: false,
+        });
+      } catch (error) {
+        setLoadError('Unable to add payment method.');
+      }
     }
   };
 
-  const handleDeleteMethod = (id: string) => {
-    setPaymentMethods(paymentMethods.filter(m => m.id !== id));
+  const handleDeleteMethod = async (id: string) => {
+    try {
+      await apiFetch<void>(`/payment-methods/${id}`, { method: 'DELETE' });
+      setPaymentMethods(paymentMethods.filter(m => m.id !== id));
+    } catch (error) {
+      setLoadError('Unable to delete payment method.');
+    }
   };
 
-  const handleSetPrimary = (id: string) => {
-    setPaymentMethods(paymentMethods.map(m => ({
-      ...m,
-      isPrimary: m.id === id,
-    })));
+  const handleSetPrimary = async (id: string) => {
+    try {
+      await apiFetch<PaymentMethod>(`/payment-methods/${id}/primary`, { method: 'PATCH' });
+      setPaymentMethods(paymentMethods.map(m => ({
+        ...m,
+        isPrimary: m.id === id,
+      })));
+    } catch (error) {
+      setLoadError('Unable to update primary method.');
+    }
   };
 
   const getIcon = (type: string) => {
@@ -96,6 +106,16 @@ export function PaymentMethods() {
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
+      {isLoading && (
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+          Loading payment methods...
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

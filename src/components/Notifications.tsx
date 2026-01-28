@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bell, X, Sparkles, TrendingUp, Calendar } from 'lucide-react';
+import { apiFetch } from '../api/client';
 
 interface Notification {
   id: string;
@@ -10,55 +11,44 @@ interface Notification {
   read: boolean;
 }
 
-const mockNotifications: Notification[] = [
-  {
-    id: '1',
-    type: 'upcoming-bill',
-    title: '🎯 Upcoming Payment Reminder',
-    message: 'You have a payment of $500 due on January 1st for Chase Credit Card. You\'re doing amazing - every payment brings you closer to financial freedom!',
-    date: '2024-12-18',
-    read: false,
-  },
-  {
-    id: '2',
-    type: 'payment-success',
-    title: '🌟 Payment Successful!',
-    message: 'Great news! Your payment of $450 has been processed. You\'re one step closer to your goal! Keep up the incredible momentum!',
-    date: '2024-12-15',
-    read: false,
-  },
-  {
-    id: '3',
-    type: 'upcoming-bill',
-    title: '💪 Friendly Payment Reminder',
-    message: 'Personal Loan - Bank payment of $300 is due on December 20th. You\'ve got this! Each payment is a victory on your journey to debt freedom.',
-    date: '2024-12-16',
-    read: false,
-  },
-  {
-    id: '4',
-    type: 'milestone',
-    title: '🎉 You\'re Making Progress!',
-    message: 'Amazing work! You\'ve reduced your total debt by 15% this quarter. Your dedication is paying off - literally! Keep pushing forward!',
-    date: '2024-12-12',
-    read: true,
-  },
-];
-
 export function Notifications() {
-  const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showPanel, setShowPanel] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadNotifications = async () => {
+      try {
+        const data = await apiFetch<Notification[]>('/notifications');
+        setNotifications(data);
+      } catch (error) {
+        setLoadError('Unable to load notifications.');
+      }
+    };
+
+    loadNotifications();
+  }, []);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const markAsRead = (id: string) => {
-    setNotifications(notifications.map(n =>
-      n.id === id ? { ...n, read: true } : n
-    ));
+  const markAsRead = async (id: string) => {
+    try {
+      await apiFetch<Notification>(`/notifications/${id}`, { method: 'PATCH' });
+      setNotifications(notifications.map(n =>
+        n.id === id ? { ...n, read: true } : n
+      ));
+    } catch (error) {
+      setLoadError('Unable to update notification.');
+    }
   };
 
-  const dismissNotification = (id: string) => {
-    setNotifications(notifications.filter(n => n.id !== id));
+  const dismissNotification = async (id: string) => {
+    try {
+      await apiFetch<void>(`/notifications/${id}`, { method: 'DELETE' });
+      setNotifications(notifications.filter(n => n.id !== id));
+    } catch (error) {
+      setLoadError('Unable to dismiss notification.');
+    }
   };
 
   const getNotificationIcon = (type: string) => {
@@ -125,6 +115,11 @@ export function Notifications() {
 
             {/* Notifications List */}
             <div className="flex-1 overflow-y-auto">
+              {loadError && (
+                <div className="p-4 text-sm text-red-600">
+                  {loadError}
+                </div>
+              )}
               {notifications.length === 0 ? (
                 <div className="p-8 text-center">
                   <Bell className="w-12 h-12 text-gray-300 mx-auto mb-3" />
@@ -180,7 +175,14 @@ export function Notifications() {
             {notifications.length > 0 && (
               <div className="p-3 border-t border-gray-200 bg-gray-50">
                 <button
-                  onClick={() => setNotifications([])}
+                  onClick={async () => {
+                    try {
+                      await apiFetch<void>('/notifications', { method: 'DELETE' });
+                      setNotifications([]);
+                    } catch (error) {
+                      setLoadError('Unable to clear notifications.');
+                    }
+                  }}
                   className="w-full text-sm text-gray-600 hover:text-gray-900 transition-colors"
                 >
                   Clear all notifications

@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { Upload, Phone, DollarSign, FileText, X, Calendar, CheckCircle, AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Upload, Phone, DollarSign, FileText, X, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { toast } from 'sonner@2.0.3';
+import { apiFetch } from '../api/client';
 
 interface Document {
   id: string;
@@ -27,28 +28,10 @@ interface CreditorCall {
 }
 
 export function DocumentsActivity() {
-  const [documents, setDocuments] = useState<Document[]>([
-    {
-      id: '1',
-      type: 'notice',
-      fileName: 'collection_notice_chase.pdf',
-      uploadDate: '2024-12-15',
-      creditor: 'Chase Credit Card',
-      notes: 'Final notice before legal action',
-    },
-  ]);
-  
-  const [creditorCalls, setCreditorCalls] = useState<CreditorCall[]>([
-    {
-      id: '1',
-      date: '2024-12-20',
-      creditor: 'Capital One',
-      phoneNumber: '1-800-555-0123',
-      extension: '4567',
-      regarding: 'Settlement offer discussion',
-      notes: 'Offered 60% settlement',
-    },
-  ]);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [creditorCalls, setCreditorCalls] = useState<CreditorCall[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [showUploadForm, setShowUploadForm] = useState(false);
   const [showCallLogForm, setShowCallLogForm] = useState(false);
@@ -73,6 +56,25 @@ export function DocumentsActivity() {
   const [budgetAvailableDate, setBudgetAvailableDate] = useState('');
   const [budgetNotes, setBudgetNotes] = useState('');
 
+  useEffect(() => {
+    const loadActivity = async () => {
+      try {
+        const [documentsData, callsData] = await Promise.all([
+          apiFetch<Document[]>('/documents'),
+          apiFetch<CreditorCall[]>('/creditor-calls'),
+        ]);
+        setDocuments(documentsData);
+        setCreditorCalls(callsData);
+      } catch (error) {
+        setLoadError('Unable to load documents and calls.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadActivity();
+  }, []);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -91,105 +93,132 @@ export function DocumentsActivity() {
     }
   };
 
-  const handleUploadDocument = () => {
+  const handleUploadDocument = async () => {
     if (!selectedFile || !uploadCreditor) {
       toast.error('Please select a file and enter creditor name');
       return;
     }
 
-    const newDocument: Document = {
-      id: Date.now().toString(),
-      type: uploadType,
-      fileName: selectedFile.name,
-      uploadDate: new Date().toISOString().split('T')[0],
-      creditor: uploadCreditor,
-      notes: uploadNotes,
-    };
+    try {
+      const newDocument = await apiFetch<Document>('/documents', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: uploadType,
+          fileName: selectedFile.name,
+          uploadDate: new Date().toISOString().split('T')[0],
+          creditor: uploadCreditor,
+          notes: uploadNotes,
+        }),
+      });
 
-    setDocuments([newDocument, ...documents]);
-    
-    // Notify admin
-    console.log('Admin notification: New document uploaded', newDocument);
-    
-    toast.success(`${uploadType === 'notice' ? 'Notice' : 'Receipt'} uploaded successfully! Admin has been notified.`);
-    
-    // Reset form
-    setSelectedFile(null);
-    setUploadCreditor('');
-    setUploadNotes('');
-    setShowUploadForm(false);
+      setDocuments([newDocument, ...documents]);
+      toast.success(`${uploadType === 'notice' ? 'Notice' : 'Receipt'} uploaded successfully! Admin has been notified.`);
+
+      // Reset form
+      setSelectedFile(null);
+      setUploadCreditor('');
+      setUploadNotes('');
+      setShowUploadForm(false);
+    } catch (error) {
+      toast.error('Unable to upload document.');
+    }
   };
 
-  const handleLogCall = () => {
+  const handleLogCall = async () => {
     if (!callDate || !callCreditor || !callPhone || !callRegarding) {
       toast.error('Please fill in all required fields');
       return;
     }
 
-    const newCall: CreditorCall = {
-      id: Date.now().toString(),
-      date: callDate,
-      creditor: callCreditor,
-      phoneNumber: callPhone,
-      extension: callExtension,
-      regarding: callRegarding,
-      notes: callNotes,
-    };
+    try {
+      const newCall = await apiFetch<CreditorCall>('/creditor-calls', {
+        method: 'POST',
+        body: JSON.stringify({
+          date: callDate,
+          creditor: callCreditor,
+          phoneNumber: callPhone,
+          extension: callExtension || undefined,
+          regarding: callRegarding,
+          notes: callNotes,
+        }),
+      });
 
-    setCreditorCalls([newCall, ...creditorCalls]);
-    
-    // Notify admin
-    console.log('Admin notification: New creditor call logged', newCall);
-    
-    toast.success('Creditor call logged successfully! Admin has been notified.');
-    
-    // Reset form
-    setCallDate('');
-    setCallCreditor('');
-    setCallPhone('');
-    setCallExtension('');
-    setCallRegarding('');
-    setCallNotes('');
-    setShowCallLogForm(false);
+      setCreditorCalls([newCall, ...creditorCalls]);
+      toast.success('Creditor call logged successfully! Admin has been notified.');
+
+      // Reset form
+      setCallDate('');
+      setCallCreditor('');
+      setCallPhone('');
+      setCallExtension('');
+      setCallRegarding('');
+      setCallNotes('');
+      setShowCallLogForm(false);
+    } catch (error) {
+      toast.error('Unable to log call.');
+    }
   };
 
-  const handleUpdateBudget = () => {
+  const handleUpdateBudget = async () => {
     if (!budgetAmount || !budgetAvailableDate) {
       toast.error('Please enter budget amount and available date');
       return;
     }
 
-    const budgetUpdate = {
-      amount: parseFloat(budgetAmount),
-      availableDate: budgetAvailableDate,
-      notes: budgetNotes,
-      timestamp: new Date().toISOString(),
-    };
+    try {
+      await apiFetch('/budget-commitments', {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: parseFloat(budgetAmount),
+          availableDate: budgetAvailableDate,
+          notes: budgetNotes,
+        }),
+      });
 
-    // Notify admin
-    console.log('Admin notification: Budget updated', budgetUpdate);
-    
-    toast.success(`Budget updated to $${parseFloat(budgetAmount).toLocaleString()}! Admin has been notified.`);
-    
-    // Reset form
-    setBudgetAmount('');
-    setBudgetAvailableDate('');
-    setBudgetNotes('');
-    setShowBudgetForm(false);
+      toast.success(`Budget updated to $${parseFloat(budgetAmount).toLocaleString()}! Admin has been notified.`);
+
+      // Reset form
+      setBudgetAmount('');
+      setBudgetAvailableDate('');
+      setBudgetNotes('');
+      setShowBudgetForm(false);
+    } catch (error) {
+      toast.error('Unable to update budget.');
+    }
   };
 
-  const handleDeleteDocument = (id: string) => {
-    setDocuments(documents.filter(doc => doc.id !== id));
-    toast.success('Document deleted');
+  const handleDeleteDocument = async (id: string) => {
+    try {
+      await apiFetch<void>(`/documents/${id}`, { method: 'DELETE' });
+      setDocuments(documents.filter(doc => doc.id !== id));
+      toast.success('Document deleted');
+    } catch (error) {
+      toast.error('Unable to delete document.');
+    }
   };
 
-  const handleDeleteCall = (id: string) => {
-    setCreditorCalls(creditorCalls.filter(call => call.id !== id));
-    toast.success('Call log deleted');
+  const handleDeleteCall = async (id: string) => {
+    try {
+      await apiFetch<void>(`/creditor-calls/${id}`, { method: 'DELETE' });
+      setCreditorCalls(creditorCalls.filter(call => call.id !== id));
+      toast.success('Call log deleted');
+    } catch (error) {
+      toast.error('Unable to delete call log.');
+    }
   };
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
+      {isLoading && (
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+          Loading activity...
+        </div>
+      )}
       {/* Page Header */}
       <div>
         <h2 className="text-2xl font-bold text-gray-900">Documents & Activity</h2>

@@ -2,30 +2,43 @@ import { TrendingDown, DollarSign, Target, Clock } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { BudgetApprovalNotification } from './BudgetApprovalNotification';
 import { useState, useEffect } from 'react';
+import { apiFetch } from '../api/client';
 
-const debtByType = [
-  { name: 'Credit Cards', value: 18500, color: '#3b82f6' },
-  { name: 'Medical Bills', value: 12300, color: '#10b981' },
-  { name: 'Personal Loans', value: 8900, color: '#f59e0b' },
-  { name: 'Other', value: 5530, color: '#6366f1' },
-];
+const chartColors = ['#3b82f6', '#10b981', '#f59e0b', '#6366f1', '#ec4899', '#14b8a6'];
 
-const settlementProgress = [
-  { month: 'Jan', original: 52000, current: 48000 },
-  { month: 'Feb', original: 52000, current: 47000 },
-  { month: 'Mar', original: 52000, current: 45230 },
-  { month: 'Apr', original: 52000, current: 45230 },
-  { month: 'May', original: 52000, current: 45230 },
-  { month: 'Jun', original: 52000, current: 45230 },
-];
+interface DashboardResponse {
+  totalDebt: number;
+  totalOriginal: number;
+  settlementTarget: number;
+  activeSettlements: number;
+  debtByType: { name: string; value: number }[];
+  settlementProgress: { month: string; original: number; current: number }[];
+  nextPayment: { amount: number; dueDate: string; creditor: string } | null;
+  recentActivity: { type: string; creditor: string; amount: number; date: string | null }[];
+}
 
 export function Dashboard() {
   const [chartsReady, setChartsReady] = useState(false);
+  const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     // Delay chart rendering to ensure container is mounted
     const timer = setTimeout(() => setChartsReady(true), 100);
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const loadDashboard = async () => {
+      try {
+        const data = await apiFetch<DashboardResponse>('/dashboard');
+        setDashboardData(data);
+      } catch (error) {
+        setLoadError('Unable to load dashboard data.');
+      }
+    };
+
+    loadDashboard();
   }, []);
 
   const handleMessageClick = () => {
@@ -40,8 +53,28 @@ export function Dashboard() {
     // In production, this would update the backend
   };
 
+  const debtByType = (dashboardData?.debtByType || []).map((entry, index) => ({
+    ...entry,
+    color: chartColors[index % chartColors.length],
+  }));
+
+  const settlementProgress = dashboardData?.settlementProgress || [];
+  const totalDebt = dashboardData?.totalDebt || 0;
+  const totalOriginal = dashboardData?.totalOriginal || 0;
+  const settlementTarget = dashboardData?.settlementTarget || 0;
+  const activeSettlements = dashboardData?.activeSettlements || 0;
+  const nextPayment = dashboardData?.nextPayment;
+  const recentActivity = dashboardData?.recentActivity || [];
+  const debtReduction = totalOriginal > 0 ? Math.round(((totalOriginal - totalDebt) / totalOriginal) * 100) : 0;
+  const savingsPercent = totalDebt > 0 ? Math.round((settlementTarget / totalDebt) * 100) : 0;
+
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
       {/* Budget Approval Notification */}
       <BudgetApprovalNotification 
         onMessageClick={handleMessageClick}
@@ -54,7 +87,7 @@ export function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Total Debt</p>
-              <p className="text-2xl text-gray-900 mt-1">$45,230</p>
+              <p className="text-2xl text-gray-900 mt-1">${totalDebt.toLocaleString()}</p>
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
               <DollarSign className="w-6 h-6 text-blue-600" />
@@ -62,7 +95,7 @@ export function Dashboard() {
           </div>
           <div className="mt-4 flex items-center text-sm">
             <TrendingDown className="w-4 h-4 text-green-600 mr-1" />
-            <span className="text-green-600">13% decrease</span>
+            <span className="text-green-600">{debtReduction}% decrease</span>
             <span className="text-gray-500 ml-1">from original</span>
           </div>
         </div>
@@ -71,7 +104,7 @@ export function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Settlement Target</p>
-              <p className="text-2xl text-gray-900 mt-1">$27,138</p>
+              <p className="text-2xl text-gray-900 mt-1">${Math.round(settlementTarget).toLocaleString()}</p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
               <DollarSign className="w-6 h-6 text-green-600" />
@@ -80,10 +113,10 @@ export function Dashboard() {
           <div className="mt-4">
             <div className="flex justify-between text-sm mb-1">
               <span className="text-gray-500">40% savings goal</span>
-              <span className="text-gray-900">60%</span>
+              <span className="text-gray-900">{savingsPercent}%</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2">
-              <div className="bg-green-600 h-2 rounded-full" style={{ width: '60%' }}></div>
+              <div className="bg-green-600 h-2 rounded-full" style={{ width: `${savingsPercent}%` }}></div>
             </div>
           </div>
         </div>
@@ -92,26 +125,30 @@ export function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Active Settlements</p>
-              <p className="text-2xl text-gray-900 mt-1">3</p>
+              <p className="text-2xl text-gray-900 mt-1">{activeSettlements}</p>
             </div>
             <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
               <Clock className="w-6 h-6 text-purple-600" />
             </div>
           </div>
-          <p className="text-sm text-gray-500 mt-4">2 pending approval</p>
+          <p className="text-sm text-gray-500 mt-4">Keep an eye on new approvals</p>
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Next Payment</p>
-              <p className="text-2xl text-gray-900 mt-1">$850</p>
+              <p className="text-2xl text-gray-900 mt-1">
+                {nextPayment ? `$${nextPayment.amount.toLocaleString()}` : 'N/A'}
+              </p>
             </div>
             <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
               <DollarSign className="w-6 h-6 text-orange-600" />
             </div>
           </div>
-          <p className="text-sm text-gray-500 mt-4">Due in 5 days</p>
+          <p className="text-sm text-gray-500 mt-4">
+            {nextPayment?.dueDate ? `Due ${nextPayment.dueDate}` : 'No upcoming payments'}
+          </p>
         </div>
       </div>
 
@@ -176,36 +213,36 @@ export function Dashboard() {
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h3 className="text-gray-900 mb-4">Recent Activity</h3>
         <div className="space-y-4">
-          <div className="flex items-start gap-4 pb-4 border-b border-gray-100">
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
-              <DollarSign className="w-5 h-5 text-green-600" />
-            </div>
-            <div className="flex-1">
-              <p className="text-gray-900">Payment processed</p>
-              <p className="text-sm text-gray-500">$850.00 paid to Chase Credit Card</p>
-              <p className="text-xs text-gray-400 mt-1">2 days ago</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-4 pb-4 border-b border-gray-100">
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Target className="w-5 h-5 text-green-600" />
-            </div>
-            <div className="flex-1">
-              <p className="text-gray-900">Settlement offer accepted</p>
-              <p className="text-sm text-gray-500">Medical Center - 45% reduction approved</p>
-              <p className="text-xs text-gray-400 mt-1">5 days ago</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-4">
-            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Clock className="w-5 h-5 text-purple-600" />
-            </div>
-            <div className="flex-1">
-              <p className="text-gray-900">New settlement proposal</p>
-              <p className="text-sm text-gray-500">Capital One - Waiting for review</p>
-              <p className="text-xs text-gray-400 mt-1">1 week ago</p>
-            </div>
-          </div>
+          {recentActivity.length === 0 ? (
+            <p className="text-sm text-gray-500">No recent activity yet.</p>
+          ) : (
+            recentActivity.map((activity, index) => {
+              const isPayment = activity.type === 'payment';
+              return (
+                <div
+                  key={`${activity.type}-${activity.creditor}-${index}`}
+                  className={`flex items-start gap-4 ${index < recentActivity.length - 1 ? 'pb-4 border-b border-gray-100' : ''}`}
+                >
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${isPayment ? 'bg-green-100' : 'bg-purple-100'}`}>
+                    {isPayment ? (
+                      <DollarSign className="w-5 h-5 text-green-600" />
+                    ) : (
+                      <Target className="w-5 h-5 text-purple-600" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-gray-900">
+                      {isPayment ? 'Payment scheduled' : 'Settlement commitment signed'}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      ${activity.amount.toLocaleString()} {isPayment ? 'to' : 'for'} {activity.creditor}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">{activity.date || 'Recently'}</p>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
