@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Users, FileText, TrendingUp, DollarSign, Search, MoreVertical, CheckCircle, Clock, X, Save, Upload, Download, Eye, History, MessageCircle, Video, Circle, Plus, Trash2, Bell, Calendar, AlertCircle, Shield, Edit, XCircle, LayoutDashboard, UserCog, ClipboardList, Phone, Printer, MapPin, CreditCard, Banknote, Filter, ArrowUpDown, Wallet } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { EmailPDFViewer } from './EmailPDFViewer';
 import { Chat } from './Chat';
 import { VideoCall } from './VideoCall';
+import { apiFetch } from '../api/client';
 
 interface Client {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   totalDebt: number;
   settledAmount: number;
   status: 'Active' | 'Pending' | 'Completed';
@@ -1674,8 +1676,10 @@ const emptyPolicyForm = {
 };
 
 export function AdminDashboard() {
-  const [clients, setClients] = useState<Client[]>(mockClients);
-  const [debts, setDebts] = useState<Debt[]>(mockDebts);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [debts, setDebts] = useState<Debt[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
   const [editedNotes, setEditedNotes] = useState<Debt['internalNotes'] | null>(null);
@@ -1718,6 +1722,25 @@ export function AdminDashboard() {
   const [budgetApprovalMessages, setBudgetApprovalMessages] = useState<BudgetApprovalMessage[]>([]);
   const [showSendBudgetMessage, setShowSendBudgetMessage] = useState(false);
   const [selectedClientForBudget, setSelectedClientForBudget] = useState<Client | null>(null);
+
+  useEffect(() => {
+    const loadAdminData = async () => {
+      try {
+        const [clientData, debtData] = await Promise.all([
+          apiFetch<Client[]>('/admin/clients'),
+          apiFetch<Debt[]>('/admin/debts'),
+        ]);
+        setClients(clientData);
+        setDebts(debtData);
+      } catch (error) {
+        setLoadError('Unable to load admin data.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadAdminData();
+  }, []);
 
   const filteredClients = clients.filter(client =>
     client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1792,14 +1815,27 @@ export function AdminDashboard() {
         editHistory: [newHistoryEntry, ...(editedNotes.editHistory || [])]
       };
 
-      const updatedDebts = debts.map(d =>
-        d.id === selectedDebt.id
-          ? { ...d, internalNotes: updatedNotes }
-          : d
-      );
-      setDebts(updatedDebts);
-      setSelectedDebt({ ...selectedDebt, internalNotes: updatedNotes });
-      setEditedNotes(updatedNotes);
+      const updatedDebt = { ...selectedDebt, internalNotes: updatedNotes };
+      apiFetch<Debt>(`/admin/debts/${selectedDebt.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          internalNotes: updatedNotes,
+          settlementOffers: selectedDebt.settlementOffers || [],
+        }),
+      })
+        .then((response) => {
+          const updatedDebts = debts.map(d =>
+            d.id === selectedDebt.id
+              ? { ...d, internalNotes: response.internalNotes }
+              : d
+          );
+          setDebts(updatedDebts);
+          setSelectedDebt({ ...selectedDebt, internalNotes: response.internalNotes });
+          setEditedNotes(response.internalNotes || updatedNotes);
+        })
+        .catch(() => {
+          setLoadError('Unable to save internal notes.');
+        });
     }
   };
 
@@ -1816,14 +1852,27 @@ export function AdminDashboard() {
         offerPercentage: 0
       };
 
-      const updatedDebts = debts.map(d =>
-        d.id === selectedDebt.id
-          ? { ...d, settlementOffers: [...(d.settlementOffers || []), newOffer] }
-          : d
-      );
-      
-      setDebts(updatedDebts);
-      setSelectedDebt({ ...selectedDebt, settlementOffers: [...(selectedDebt.settlementOffers || []), newOffer] });
+      const updatedOffers = [...(selectedDebt.settlementOffers || []), newOffer];
+
+      apiFetch<Debt>(`/admin/debts/${selectedDebt.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          internalNotes: selectedDebt.internalNotes || null,
+          settlementOffers: updatedOffers,
+        }),
+      })
+        .then((response) => {
+          const updatedDebts = debts.map(d =>
+            d.id === selectedDebt.id
+              ? { ...d, settlementOffers: response.settlementOffers }
+              : d
+          );
+          setDebts(updatedDebts);
+          setSelectedDebt({ ...selectedDebt, settlementOffers: response.settlementOffers });
+        })
+        .catch(() => {
+          setLoadError('Unable to save settlement offer.');
+        });
     }
   };
 
@@ -1859,27 +1908,31 @@ export function AdminDashboard() {
     setClientFormErrors(errors);
 
     if (Object.keys(errors).length === 0) {
-      const newId = Date.now().toString();
-      const newClientWithId: Client = {
-        id: newId,
-        name: newClient.name,
-        email: newClient.email,
-        totalDebt: 0,
-        settledAmount: 0,
-        status: 'Pending',
-        joinDate: new Date().toISOString().split('T')[0],
-        activeSettlements: 0
-      };
-      setClients([...clients, newClientWithId]);
-      setShowAddClientModal(false);
-      setNewClient({
-        name: '',
-        email: '',
-        phone: '',
-        password: '',
-        confirmPassword: ''
-      });
-      setClientFormErrors({});
+      apiFetch<Client>('/admin/clients', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: newClient.name,
+          email: newClient.email,
+          phone: newClient.phone,
+          status: 'Pending',
+          joinDate: new Date().toISOString().split('T')[0],
+        }),
+      })
+        .then((createdClient) => {
+          setClients([...clients, createdClient]);
+          setShowAddClientModal(false);
+          setNewClient({
+            name: '',
+            email: '',
+            phone: '',
+            password: '',
+            confirmPassword: ''
+          });
+          setClientFormErrors({});
+        })
+        .catch(() => {
+          setLoadError('Unable to add client.');
+        });
     }
   };
 
@@ -2068,6 +2121,16 @@ export function AdminDashboard() {
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
+      {isLoading && (
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+          Loading admin data...
+        </div>
+      )}
       {/* Navigation Tabs */}
       <div className="bg-white rounded-lg border border-gray-200 p-2">
         <div className="flex items-center gap-2 overflow-x-auto">
